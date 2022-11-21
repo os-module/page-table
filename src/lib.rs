@@ -1,70 +1,68 @@
 #![no_std]
 #![allow(unused)]
+extern crate alloc;
+
+use alloc::vec::Vec;
 use core::marker::PhantomData;
-use core::ops::Range;
+use core::ops::{Add, Range, Sub};
 
 mod area;
 mod entry;
 mod space;
 mod table;
 
-pub enum PagingMode {
-    #[cfg(feature = "rv32")]
-    Sv32,
-    #[cfg(feature = "rv64")]
-    Sv39,
-    #[cfg(feature = "rv64")]
-    Sv48,
-}
-
-pub trait MetaData: Copy + Clone {
-    const PAGE_SIZE: usize;
-    const PAGING_MODE: PagingMode;
-    fn entry_size() -> usize {
-        match Self::PAGING_MODE {
-            #[cfg(feature = "rv32")]
-            PagingMode::Sv32 => 4,
-            #[cfg(feature = "rv64")]
-            PagingMode::Sv39 => 8,
-            #[cfg(feature = "rv64")]
-            PagingMode::Sv48 => 8,
-        }
-    }
-    fn entry_per_page() -> usize {
-        Self::PAGE_SIZE / Self::entry_size()
-    }
-    fn page_size() -> usize {
-        Self::PAGE_SIZE
-    }
-    fn ppn_index_range() -> Range<usize> {
-        match Self::PAGING_MODE {
-            #[cfg(feature = "rv32")]
-            PagingMode::Sv32 => 10..32,
-            #[cfg(feature = "rv64")]
-            PagingMode::Sv39 => 10..39,
-            #[cfg(feature = "rv64")]
-            PagingMode::Sv48 => 10..48,
-        }
-    }
-}
 
 type PhyAddr = usize;
 type VirtAddr = usize;
 
 #[derive(Copy, Clone, Debug)]
-pub struct PageNumber<T: MetaData>(usize, PhantomData<T>);
+pub struct PageNumber(usize);
 
-pub type PPN<T> = PageNumber<T>;
-pub type VPN<T> = PageNumber<T>;
+pub type PPN = PageNumber;
+pub type VPN = PageNumber;
 
-impl<T: MetaData> PageNumber<T> {
+pub trait VPNToSlice {
+    fn to_slice(&self) -> &[usize];
+}
+
+
+impl PageNumber {
     pub fn new(num: usize) -> Self {
-        let ppn_index_range = T::ppn_index_range();
-        let ppn_range = 0..1 << (ppn_index_range.end - ppn_index_range.start);
-        assert!(ppn_range.contains(&num));
-        Self(num, PhantomData)
+        assert_eq!(num.trailing_zeros(), 12);
+        Self(num)
     }
     pub fn to_address(&self) -> usize {
-        self.0 * T::page_size()
+        self.0 << 12
+    }
+}
+
+impl Sub for PageNumber {
+    type Output = usize;
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.0 - rhs.0
+    }
+}
+
+impl  Add for PageNumber{
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.0 + rhs.0)
+    }
+}
+
+impl From<usize> for PageNumber {
+    fn from(value: usize) -> Self {
+        assert_eq!(num.trailing_zeros(), 12);
+        Self(value)
+    }
+}
+
+impl VPNToSlice for PageNumber {
+    fn to_slice(&self) -> &[usize] {
+        let mut slice = [0; 3];
+        slice[0] = self.0 >> 27;
+        slice[1] = (self.0 >> 18) & 0x1ff;
+        slice[2] = (self.0 >> 9) & 0x1ff;
+        unsafe { core::slice::from_raw_parts(slice.as_ptr(), slice.len()) }
     }
 }

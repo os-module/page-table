@@ -2,9 +2,9 @@ use crate::{MetaData, PPN};
 use bitflags::bitflags;
 use core::marker::PhantomData;
 
-pub struct PageTableEntry<T: MetaData> {
+#[derive(Copy, Clone,Debug)]
+pub struct PageTableEntry{
     entry: usize,
-    meta: PhantomData<T>,
 }
 
 bitflags! {
@@ -33,20 +33,24 @@ pub trait PTELike {
     fn is_dirty(&self) -> bool;
     fn physical_address(&self) -> usize;
 }
-impl<T: MetaData> PageTableEntry<T> {
-    pub fn new(ppn: PPN<T>, attr: PTEFlags) -> Self {
-        let entry = ppn.0 << T::ppn_index_range().start | attr.bits() as usize;
+impl PageTableEntry {
+    pub fn new(ppn: PPN, attr: PTEFlags) -> Self {
+        let entry = ppn.0 << 12 | attr.bits() as usize;
         Self {
             entry,
-            meta: PhantomData,
         }
     }
     fn flag(&self) -> PTEFlags {
         PTEFlags::from_bits(self.entry as u8).unwrap()
     }
+    pub fn empty() -> Self {
+        Self {
+            entry: 0,
+        }
+    }
 }
 
-impl<T: MetaData> PTELike for PageTableEntry<T> {
+impl PTELike for PageTableEntry {
     fn is_valid(&self) -> bool {
         self.flag().contains(PTEFlags::V)
     }
@@ -86,14 +90,9 @@ mod tests {
     #[derive(Copy, Clone)]
     struct Meta;
 
-    impl MetaData for Meta {
-        const PAGE_SIZE: usize = 0x1000;
-        const PAGING_MODE: PagingMode = PagingMode::Sv39;
-    }
-
     #[test]
     fn test_entry() {
-        let entry = PageTableEntry::<Meta>::new(PPN::<Meta>::new(0), PTEFlags::V);
+        let entry = PageTableEntry::new(PPN::new(0), PTEFlags::V);
         assert!(entry.is_valid());
         assert!(!entry.is_read());
         assert!(!entry.is_write());
@@ -102,9 +101,10 @@ mod tests {
         assert!(!entry.is_accessed());
         assert!(!entry.is_dirty());
         assert_eq!(entry.physical_address(), 0);
-        let entry = PageTableEntry::<Meta>::new(PPN::<Meta>::new(1), PTEFlags::V | PTEFlags::R);
+        let entry = PageTableEntry::new(PPN::new(1), PTEFlags::V | PTEFlags::R);
         assert!(entry.is_valid());
         assert!(entry.is_read());
         assert_eq!(entry.physical_address(), 0x1000);
+        assert_eq!(core::mem::size_of_val(&entry), core::mem::size_of::<usize>());
     }
 }

@@ -1,24 +1,39 @@
 use crate::{MetaData, PPN};
 use core::marker::PhantomData;
+use crate::entry::PageTableEntry;
 
-pub struct PageTable<T: MetaData> {
-    /// 根页表的物理页号
-    root: PPN<T>,
-    /// 页表的元数据
-    meta: PhantomData<T>,
+pub struct PageTable {
+    entries: [PageTableEntry;512]
 }
 
-impl<T: MetaData> PageTable<T> {
-    /// 新建一个页表
-    pub fn new(root_ppn: PPN<T>) -> Self {
+impl PageTable {
+    pub fn new() -> Self {
         Self {
-            root: root_ppn,
-            meta: PhantomData,
+            entries: [PageTableEntry::empty(); N],
         }
     }
+    pub fn from_ppn(ppn: PPN) -> &'static mut Self {
+        unsafe { &mut *(ppn.to_address() as *mut Self) }
+    }
+    pub fn iter(&self) -> core::slice::Iter<'_, PageTableEntry> {
+        self.entries.iter()
+    }
+}
 
-    /// 获取根页表的物理页号
-    fn root_ppn(&self) -> PPN<T> {
-        self.root
+
+
+
+#[cfg(test)]
+mod tests{
+    use crate::entry::PTELike;
+    use crate::PagingMode;
+    use super::*;
+
+    #[test]
+    fn test_page_table(){
+        let mut page_table = PageTable::new();
+        page_table.iter().for_each(|entry|{
+            assert!(!entry.is_valid())
+        });
     }
 }
