@@ -1,8 +1,10 @@
-use crate::{MetaData, PPN};
+use core::fmt::{Debug, Formatter, write};
+use crate::{PPN};
 use bitflags::bitflags;
 use core::marker::PhantomData;
 
 #[derive(Copy, Clone,Debug)]
+#[repr(C)]
 pub struct PageTableEntry{
     entry: usize,
 }
@@ -23,6 +25,26 @@ bitflags! {
     }
 }
 
+pub struct PTEFlagsBuilder(pub PTEFlags);
+
+impl Debug for PTEFlagsBuilder{
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}{}{}{}{}{}{}{}",
+               if self.0.contains(PTEFlags::D) { "D" } else { "-" },
+               if self.0.contains(PTEFlags::A) { "A" } else { "-" },
+               if self.0.contains(PTEFlags::G) { "G" } else { "-" },
+               if self.0.contains(PTEFlags::U) { "U" } else { "-" },
+               if self.0.contains(PTEFlags::X) { "X" } else { "-" },
+               if self.0.contains(PTEFlags::W) { "W" } else { "-" },
+               if self.0.contains(PTEFlags::R) { "R" } else { "-" },
+               if self.0.contains(PTEFlags::V) { "V" } else { "-" },
+        )
+    }
+}
+
+
+
+
 pub trait PTELike {
     fn is_valid(&self) -> bool;
     fn is_read(&self) -> bool;
@@ -35,18 +57,21 @@ pub trait PTELike {
 }
 impl PageTableEntry {
     pub fn new(ppn: PPN, attr: PTEFlags) -> Self {
-        let entry = ppn.0 << 12 | attr.bits() as usize;
+        let entry = ppn.0 << 10 | attr.bits() as usize;
         Self {
             entry,
         }
     }
-    fn flag(&self) -> PTEFlags {
+    pub fn flag(&self) -> PTEFlags {
         PTEFlags::from_bits(self.entry as u8).unwrap()
     }
     pub fn empty() -> Self {
         Self {
             entry: 0,
         }
+    }
+    pub fn ppn(&self)->PPN{
+        (self.entry >> 10).into()
     }
 }
 
@@ -79,17 +104,13 @@ impl PTELike for PageTableEntry {
     }
 
     fn physical_address(&self) -> usize {
-        (self.entry >> T::ppn_index_range().start) * T::PAGE_SIZE
+        (self.entry >> 10) * 0x1000
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PagingMode;
-    #[derive(Copy, Clone)]
-    struct Meta;
-
     #[test]
     fn test_entry() {
         let entry = PageTableEntry::new(PPN::new(0), PTEFlags::V);
