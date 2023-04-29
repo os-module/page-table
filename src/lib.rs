@@ -1,5 +1,6 @@
 #![feature(step_trait)]
-#![no_std]
+#![feature(error_in_core)]
+#![cfg_attr(not(test), no_std)]
 #![allow(unused)]
 extern crate alloc;
 use alloc::vec::Vec;
@@ -11,15 +12,17 @@ mod area;
 mod entry;
 mod space;
 mod table;
+mod error;
 
 pub type PPN = PageNumber;
 pub type VPN = PageNumber;
 
 pub use space::AddressSpace;
 pub use area::{Area, AreaPermission};
+pub use entry::PTEFlags;
+pub use error::PTableError;
 
-
-
+type Result<T> = core::result::Result<T, PTableError>;
 
 #[derive(Copy, Clone, Debug,  PartialOrd,PartialEq,Ord, Eq)]
 pub struct PageNumber(pub usize);

@@ -43,8 +43,6 @@ impl Debug for PTEFlagsBuilder{
 }
 
 
-
-
 pub trait PTELike {
     fn is_valid(&self) -> bool;
     fn is_read(&self) -> bool;

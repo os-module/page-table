@@ -1,5 +1,6 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter};
 use core::ops::{Deref, Range};
@@ -8,12 +9,16 @@ use crate::table::PageTable;
 use crate::{PageManager, PPN, VPN, vpn_f_c_range, VPNToSlice};
 use crate::area::Area;
 use crate::entry::{PageTableEntry, PTEFlags, PTEFlagsBuilder, PTELike};
+use crate::error::PTableError;
+use crate::Result;
+
 
 #[derive(Clone)]
 pub struct AddressSpace {
-    /// 根页表地址
+    /// the root ppn
     root_ppn: Option<PPN>,
     map_area:Vec<Area>,
+    single_vpn:Vec<(VPN,PTEFlags)>,
     page_manager:InternalManager
 }
 
@@ -49,6 +54,7 @@ impl AddressSpace{
         Self{
             root_ppn:None,
             map_area:Vec::new(),
+            single_vpn: vec![],
             page_manager:InternalManager::new(page_manager)
         }
     }
@@ -62,7 +68,8 @@ impl AddressSpace{
             self.page_manager.dealloc(*x)
         })
     }
-    pub fn copy_from_other(address_space:&AddressSpace)->Self{
+
+    pub fn copy_from_other(address_space:&AddressSpace)->Result<Self>{
         let mut new_address_space = Self::new(address_space.page_manager.manager.clone());
         for area in address_space.map_area.iter(){
             let permission = area.permission();
@@ -78,17 +85,33 @@ impl AddressSpace{
                 }
             }
         }
-        new_address_space
+        for (vpn,perm) in address_space.single_vpn.iter(){
+            let new_ppn = new_address_space.push_with_vpn(*vpn,*perm)?;
+            let old_ppn = address_space.vpn_to_ppn(*vpn).unwrap();
+            let new_physical = new_ppn.to_address() as * mut u8;
+            let old_physical = old_ppn.to_address() as * const u8;
+            unsafe {
+                new_physical.copy_from(old_physical,4096)
+            }
+        };
+        Ok(new_address_space)
+    }
+
+    fn check_root(&mut self)->Result<()>{
+        if self.root_ppn.is_none(){
+            let ppn = self.page_manager.alloc().ok_or(PTableError::AllocError)?;
+            self.root_ppn = Some(ppn);
+        }
+        Ok(())
     }
 
     pub fn push(&mut self, map_area: Area){
         self.map(&map_area,false);
         self.map_area.push(map_area);
     }
+
     fn map(&mut self, map_area:&Area, flag:bool) ->Vec<PPN>{
-        if self.root_ppn.is_none(){
-            self.root_ppn = Some(self.page_manager.alloc().unwrap());
-        }
+        self.check_root().unwrap();
         let map_permission = map_area.permission().bits();
         let mut map = Vec::new();
         for (vpn,ppn) in map_area.iter(){
@@ -138,6 +161,29 @@ impl AddressSpace{
         }
     }
 
+    pub fn push_with_vpn(&mut self, vpn:VPN, permission:PTEFlags)->Result<PPN>{
+        self.check_root()?;
+        let slice = vpn.to_slice();
+        let mut page_table = PageTable::from_ppn(self.root_ppn.unwrap());
+        for i in 0..slice.len()-1{
+            let pte = page_table[slice[i]];
+            if !pte.is_valid(){
+                let new_ppn = self.page_manager.alloc().unwrap();
+                // if the pte is invalid, alloc a new frame
+                // the non-leaf node should ensure the RWX bit is 0
+                page_table[slice[i]] = PageTableEntry::new(new_ppn,PTEFlags::V);
+                page_table = PageTable::from_ppn(new_ppn);
+            }else{
+                page_table = PageTable::from_ppn(pte.ppn());
+            }
+        }
+        // fill the leaf node
+        let ppn = self.page_manager.alloc().unwrap();
+        page_table[slice[slice.len()-1]] = PageTableEntry::new(ppn,permission);
+        self.single_vpn.push((vpn,permission));
+        Ok(ppn)
+    }
+
     pub fn vpn_to_ppn(&self,vpn:VPN)->Option<PPN>{
         let slice = vpn.to_slice();
         let mut page_table = PageTable::from_ppn(self.root_ppn.unwrap());
@@ -161,6 +207,52 @@ impl AddressSpace{
         self.vpn_to_ppn(vpn).map(|ppn| ppn.to_address() + (virtual_address & 0xfff))
     }
 
+    /// unmap area
+    ///
+    /// User should ensure that the area is mapped. User can find the area by vpn.
+    pub fn unmap(&mut self, map_area: &Area)->Result<()>{
+        let mut page_table = PageTable::from_ppn(self.root_ppn.unwrap());
+        for (vpn,_) in map_area.iter(){
+            let slice = vpn.to_slice();
+            for i in 0..slice.len()-1{
+                let pte = page_table[slice[i]];
+                if !pte.is_valid(){
+                    return Err(PTableError::NotValid);
+                }else{
+                    page_table = PageTable::from_ppn(pte.ppn());
+                }
+            }
+            page_table[slice[slice.len()-1]] = PageTableEntry::new(PPN::new(0),PTEFlags::from_bits(0).unwrap());
+        }
+        // delete map_area
+        self.map_area.retain(|area| area != map_area);
+        Ok(())
+    }
+
+    /// find area by vpn
+    pub fn find_area(&self,vpn:VPN)->Option<&Area>{
+        for area in self.map_area.iter(){
+            if area.vpn_range().contains(&vpn){
+                return Some(area);
+            }
+        }
+        None
+    }
+
+    pub fn unmap_with_vpn(&mut self,vpn:VPN)->Result<()>{
+        let mut  page_table = PageTable::from_ppn(self.root_ppn.unwrap());
+        let slice = vpn.to_slice();
+        for i in 0..slice.len()-1{
+            let pte = page_table[slice[i]];
+            if !pte.is_valid(){
+                return Err(PTableError::NotValid);
+            }else{
+                page_table = PageTable::from_ppn(pte.ppn());
+            }
+        }
+        page_table[slice[slice.len()-1]] = PageTableEntry::new(PPN::new(0),PTEFlags::from_bits(0).unwrap());
+        Ok(())
+    }
 }
 
 /// 打印多级页表并展示权限

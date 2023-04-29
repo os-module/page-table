@@ -4,15 +4,16 @@ use bitflags::bitflags;
 use core::ops::Range;
 use crate::{PageNumber, PPN, VPN};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,Eq, PartialEq)]
 pub struct Area {
-    /// 映射区域的虚拟页
+    /// vpn range
     vpn_s: Range<VPN>,
-    ///
+    /// ppn range(may be for elf)
     ppn_s: Option<Range<PPN>>,
-    /// 映射区域的权限
+    /// permission
     permission: AreaPermission,
 }
+
 
 bitflags! {
     pub struct AreaPermission: u8 {
@@ -26,12 +27,12 @@ bitflags! {
 impl AreaPermission {
     pub fn from_str(s:&str)->Self{
         let mut permission = AreaPermission::empty();
-        for c in s.chars(){
+        for c in s.as_bytes(){
             match c{
-                'r'=>permission |= AreaPermission::R,
-                'w'=>permission |= AreaPermission::W,
-                'x'=>permission |= AreaPermission::X,
-                'u'=>permission |= AreaPermission::U,
+                b'r'=>permission |= AreaPermission::R,
+                b'w'=>permission |= AreaPermission::W,
+                b'x'=>permission |= AreaPermission::X,
+                b'u'=>permission |= AreaPermission::U,
                 _=>{}
             }
         }
