@@ -106,11 +106,11 @@ impl AddressSpace{
     }
 
     pub fn push(&mut self, map_area: Area){
-        self.map(&map_area,false);
+        self.map(&map_area,false,true);
         self.map_area.push(map_area);
     }
 
-    fn map(&mut self, map_area:&Area, flag:bool) ->Vec<PPN>{
+    fn map(&mut self, map_area:&Area, flag:bool,is_valid:bool) ->Vec<PPN>{
         self.check_root().unwrap();
         let map_permission = map_area.permission().bits();
         let mut map = Vec::new();
@@ -136,16 +136,43 @@ impl AddressSpace{
             }else {
                 self.page_manager.alloc().unwrap()
             };
-            page_table[slice[slice.len()-1]] = PageTableEntry::new(ppn,PTEFlags::V|PTEFlags::from_bits(map_permission).unwrap());
+            let valid = if is_valid{
+                PTEFlags::V
+            }else {
+                PTEFlags::empty()
+            };
+            page_table[slice[slice.len()-1]] = PageTableEntry::new(ppn,valid|PTEFlags::from_bits(map_permission).unwrap());
             if flag{
                 map.push(ppn);
             }
         };
         map
     }
+    pub fn tmp_push(&mut self, map_area: Area,is_valid:bool){
+        self.map(&map_area,false,is_valid);
+        self.map_area.push(map_area);
+    }
+
+    /// The vpn is unvaild, we need to make it valid
+    pub fn tmp_make_valid(&self,vpn:VPN){
+        let slice = vpn.to_slice();
+        let mut page_table = PageTable::from_ppn(self.root_ppn.unwrap());
+        for i in 0..slice.len()-1{
+            let pte = page_table[slice[i]];
+            assert!(pte.is_valid());
+            page_table = PageTable::from_ppn(pte.ppn());
+        }
+        let pte = page_table[slice[slice.len()-1]];
+        assert!(!pte.is_valid());
+        let flag = pte.flag();
+        page_table[slice[slice.len()-1]] = PageTableEntry::new(pte.ppn(),flag|PTEFlags::V);
+    }
+
+
+
     /// 添加逻辑段并拷贝数据
     pub fn push_with_data(&mut self, map_area: Area, data:&[u8]){
-        let v_to_p = self.map(&map_area,true);
+        let v_to_p = self.map(&map_area,true,true);
         self.map_area.push(map_area);
         // 拷贝数据
         // vpn保证了键值对的顺序
