@@ -10,28 +10,26 @@ use core::ops::{Add, AddAssign, Range, Sub};
 
 mod area;
 mod entry;
+mod error;
 mod space;
 mod table;
-mod error;
 
 pub type PPN = PageNumber;
 pub type VPN = PageNumber;
 
-pub use space::AddressSpace;
 pub use area::{Area, AreaPermission};
 pub use entry::PTEFlags;
 pub use error::PTableError;
+pub use space::AddressSpace;
 
 type Result<T> = core::result::Result<T, PTableError>;
 
-#[derive(Copy, Clone, Debug,  PartialOrd,PartialEq,Ord, Eq)]
+#[derive(Copy, Clone, Debug, PartialOrd, PartialEq, Ord, Eq)]
 pub struct PageNumber(pub usize);
 
-
 pub trait VPNToSlice {
-    fn to_slice(&self) -> [usize;3];
+    fn to_slice(&self) -> [usize; 3];
 }
-
 
 impl PageNumber {
     pub fn new(num: usize) -> Self {
@@ -55,7 +53,7 @@ impl Sub for PageNumber {
     }
 }
 
-impl  Add for PageNumber{
+impl Add for PageNumber {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         Self::new(self.0 + rhs.0)
@@ -69,9 +67,9 @@ impl From<usize> for PageNumber {
 }
 
 impl VPNToSlice for PageNumber {
-    fn to_slice(&self) -> [usize;3] {
+    fn to_slice(&self) -> [usize; 3] {
         let mut slice = [0; 3];
-        slice[0] = (self.0 >> 18)&0x1ff;
+        slice[0] = (self.0 >> 18) & 0x1ff;
         slice[1] = (self.0 >> 9) & 0x1ff;
         slice[2] = self.0 & 0x1ff;
         slice
@@ -98,7 +96,7 @@ impl AddAssign for PageNumber {
     }
 }
 
-pub trait PageManager:Send+Sync {
+pub trait PageManager: Send + Sync {
     fn alloc(&self) -> Option<PPN>;
     fn dealloc(&self, ppn: PPN);
 }
@@ -133,49 +131,47 @@ macro_rules! ppn_f_c_range {
     };
 }
 
-
 #[cfg(test)]
-mod tests{
-    use crate::{PageNumber, VPN,PPN, VPNToSlice};
+mod tests {
+    use crate::{PageNumber, VPNToSlice, PPN, VPN};
 
     #[test]
-    fn test_vpn_to_slice(){
+    fn test_vpn_to_slice() {
         let vpn = VPN::new(0b111_111_111_111_111_111_111_111_111);
         let slice = vpn.to_slice();
         assert_eq!(slice.len(), 3);
-        assert_eq!(slice[0],511);
-        assert_eq!(slice[1],511);
-        assert_eq!(slice[2],511);
+        assert_eq!(slice[0], 511);
+        assert_eq!(slice[1], 511);
+        assert_eq!(slice[2], 511);
         let num = 0b000_000_001_111_111_111_000_000_001usize;
-        let vpn :VPN= num.into();
+        let vpn: VPN = num.into();
         let slice = vpn.to_slice();
-        assert_eq!(slice[0],1);
-        assert_eq!(slice[1],511);
-        assert_eq!(slice[2],1);
+        assert_eq!(slice[0], 1);
+        assert_eq!(slice[1], 511);
+        assert_eq!(slice[2], 1);
         let vpn = VPN::new(0x80200);
         let slice = vpn.to_slice();
-        assert_eq!(slice[0],2);
-        assert_eq!(slice[1],1);
-        assert_eq!(slice[2],0);
+        assert_eq!(slice[0], 2);
+        assert_eq!(slice[1], 1);
+        assert_eq!(slice[2], 0);
     }
     #[test]
-    fn test_page_number_from_address(){
+    fn test_page_number_from_address() {
         let addr = 1024;
-        let vpn =  PageNumber::ceil_address(addr);
-        assert_eq!(vpn.0,1);
+        let vpn = PageNumber::ceil_address(addr);
+        assert_eq!(vpn.0, 1);
         let addr = 4097;
         let vpn = PageNumber::ceil_address(addr);
-        assert_eq!(vpn.0,2);
+        assert_eq!(vpn.0, 2);
         let addr = 4096;
         let vpn = PageNumber::ceil_address(addr);
-        assert_eq!(vpn.0,1);
-
+        assert_eq!(vpn.0, 1);
     }
     #[test]
-    fn test_page_number_range_macro(){
+    fn test_page_number_range_macro() {
         let vpn_s = vpn_f_c_range!(0, 10);
         let ppn_s = ppn_f_c_range!(0, 10);
-        assert_eq!(vpn_s,VPN::new(0)..VPN::new(1));
-        assert_eq!(ppn_s,PPN::new(0)..PPN::new(1));
+        assert_eq!(vpn_s, VPN::new(0)..VPN::new(1));
+        assert_eq!(ppn_s, PPN::new(0)..PPN::new(1));
     }
 }

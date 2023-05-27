@@ -2,11 +2,10 @@ use core::error::Error;
 use core::fmt::{Display, Formatter};
 
 #[derive(Debug)]
-pub enum PTableError{
+pub enum PTableError {
     AllocError,
     NotValid,
 }
-
 
 impl Display for PTableError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
@@ -17,4 +16,4 @@ impl Display for PTableError {
     }
 }
 
-impl Error for PTableError{}
+impl Error for PTableError {}

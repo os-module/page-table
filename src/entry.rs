@@ -1,12 +1,18 @@
-use core::fmt::{Debug, Formatter, write};
-use crate::{PPN};
+use crate::PPN;
 use bitflags::bitflags;
+use core::fmt::{write, Debug, Formatter};
 use core::marker::PhantomData;
 
-#[derive(Copy, Clone,Debug)]
+#[derive(Copy, Clone)]
 #[repr(C)]
-pub struct PageTableEntry{
+pub struct PageTableEntry {
     entry: usize,
+}
+
+impl Debug for PageTableEntry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("PPN:0x{}- {:?}", self.ppn().0, self.flag()))
+    }
 }
 
 bitflags! {
@@ -27,21 +33,54 @@ bitflags! {
 
 pub struct PTEFlagsBuilder(pub PTEFlags);
 
-impl Debug for PTEFlagsBuilder{
+impl Debug for PTEFlagsBuilder {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}{}{}{}{}{}{}{}",
-               if self.0.contains(PTEFlags::D) { "D" } else { "-" },
-               if self.0.contains(PTEFlags::A) { "A" } else { "-" },
-               if self.0.contains(PTEFlags::G) { "G" } else { "-" },
-               if self.0.contains(PTEFlags::U) { "U" } else { "-" },
-               if self.0.contains(PTEFlags::X) { "X" } else { "-" },
-               if self.0.contains(PTEFlags::W) { "W" } else { "-" },
-               if self.0.contains(PTEFlags::R) { "R" } else { "-" },
-               if self.0.contains(PTEFlags::V) { "V" } else { "-" },
+        write!(
+            f,
+            "{}{}{}{}{}{}{}{}",
+            if self.0.contains(PTEFlags::D) {
+                "D"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::A) {
+                "A"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::G) {
+                "G"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::U) {
+                "U"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::X) {
+                "X"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::W) {
+                "W"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::R) {
+                "R"
+            } else {
+                "-"
+            },
+            if self.0.contains(PTEFlags::V) {
+                "V"
+            } else {
+                "-"
+            },
         )
     }
 }
-
 
 pub trait PTELike {
     fn is_valid(&self) -> bool;
@@ -56,19 +95,15 @@ pub trait PTELike {
 impl PageTableEntry {
     pub fn new(ppn: PPN, attr: PTEFlags) -> Self {
         let entry = ppn.0 << 10 | attr.bits() as usize;
-        Self {
-            entry,
-        }
+        Self { entry }
     }
     pub fn flag(&self) -> PTEFlags {
         PTEFlags::from_bits(self.entry as u8).unwrap()
     }
     pub fn empty() -> Self {
-        Self {
-            entry: 0,
-        }
+        Self { entry: 0 }
     }
-    pub fn ppn(&self)->PPN{
+    pub fn ppn(&self) -> PPN {
         (self.entry >> 10).into()
     }
 }
@@ -124,6 +159,9 @@ mod tests {
         assert!(entry.is_valid());
         assert!(entry.is_read());
         assert_eq!(entry.physical_address(), 0x1000);
-        assert_eq!(core::mem::size_of_val(&entry), core::mem::size_of::<usize>());
+        assert_eq!(
+            core::mem::size_of_val(&entry),
+            core::mem::size_of::<usize>()
+        );
     }
 }

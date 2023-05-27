@@ -1,10 +1,10 @@
+use crate::{PageNumber, PPN, VPN};
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::ops::Range;
-use crate::{PageNumber, PPN, VPN};
 
-#[derive(Debug, Clone,Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Area {
     /// vpn range
     vpn_s: Range<VPN>,
@@ -13,7 +13,6 @@ pub struct Area {
     /// permission
     permission: AreaPermission,
 }
-
 
 bitflags! {
     pub struct AreaPermission: u8 {
@@ -25,15 +24,15 @@ bitflags! {
 }
 
 impl AreaPermission {
-    pub fn from_str(s:&str)->Self{
+    pub fn from_str(s: &str) -> Self {
         let mut permission = AreaPermission::empty();
-        for c in s.as_bytes(){
-            match c{
-                b'r'=>permission |= AreaPermission::R,
-                b'w'=>permission |= AreaPermission::W,
-                b'x'=>permission |= AreaPermission::X,
-                b'u'=>permission |= AreaPermission::U,
-                _=>{}
+        for c in s.as_bytes() {
+            match c {
+                b'r' => permission |= AreaPermission::R,
+                b'w' => permission |= AreaPermission::W,
+                b'x' => permission |= AreaPermission::X,
+                b'u' => permission |= AreaPermission::U,
+                _ => {}
             }
         }
         permission
@@ -54,66 +53,67 @@ macro_rules! ap_from_str {
     };
 }
 
-
-
 impl Area {
-    pub fn new(vpn_s:Range<VPN>, ppn_s:Option<Range<PPN>>, permission: AreaPermission) ->Self{
+    pub fn new(vpn_s: Range<VPN>, ppn_s: Option<Range<PPN>>, permission: AreaPermission) -> Self {
         // 保证虚拟页和物理页的数量相同
-        if ppn_s.is_some(){
-            assert_eq!(vpn_s.end - vpn_s.start, ppn_s.as_ref().unwrap().end - ppn_s.as_ref().unwrap().start);
+        if ppn_s.is_some() {
+            assert_eq!(
+                vpn_s.end - vpn_s.start,
+                ppn_s.as_ref().unwrap().end - ppn_s.as_ref().unwrap().start
+            );
         }
-        Self{
+        Self {
             vpn_s,
             ppn_s,
-            permission
+            permission,
         }
     }
-    pub fn permission(&self)-> AreaPermission {
+    pub fn permission(&self) -> AreaPermission {
         self.permission
     }
-    pub fn iter(&self)->MapAreaIter{
-        MapAreaIter{
-            vpn_s:self.vpn_s.clone(),
-            ppn_s: self.ppn_s.clone()
+    pub fn iter(&self) -> MapAreaIter {
+        MapAreaIter {
+            vpn_s: self.vpn_s.clone(),
+            ppn_s: self.ppn_s.clone(),
         }
     }
-    pub fn vpn_range(&self) -> Range<VPN>{
+    pub fn vpn_range(&self) -> Range<VPN> {
         self.vpn_s.clone()
     }
-    pub fn ppn_range(&self) -> Option<Range<PPN>>{
+    pub fn ppn_range(&self) -> Option<Range<PPN>> {
         self.ppn_s.clone()
     }
 }
 
-pub struct MapAreaIter{
-    vpn_s:Range<VPN>,
-    ppn_s:Option<Range<PPN>>,
+pub struct MapAreaIter {
+    vpn_s: Range<VPN>,
+    ppn_s: Option<Range<PPN>>,
 }
 
 impl Iterator for MapAreaIter {
-type Item = (VPN,Option<VPN>);
+    type Item = (VPN, Option<VPN>);
     fn next(&mut self) -> Option<Self::Item> {
-        if self.vpn_s.is_empty(){
+        if self.vpn_s.is_empty() {
             None
-        }else {
+        } else {
             let vpn = self.vpn_s.start;
             let ppn = self.ppn_s.as_mut().map(|ppn_s| ppn_s.start);
             self.vpn_s.start += PageNumber(1);
-            self.ppn_s.as_mut().map(|ppn_s| ppn_s.start += PageNumber(1));
-            Some((vpn,ppn))
+            self.ppn_s
+                .as_mut()
+                .map(|ppn_s| ppn_s.start += PageNumber(1));
+            Some((vpn, ppn))
         }
     }
 }
 
-
-
 #[cfg(test)]
-mod tests{
+mod tests {
     use crate::area::AreaPermission;
     use crate::{Area, PPN, VPN};
 
     #[test]
-    fn test_map_area_permission(){
+    fn test_map_area_permission() {
         let bits = 0b0001_1110u8;
         let p = AreaPermission::from_bits(bits).unwrap();
         assert!(p.contains(AreaPermission::R));
@@ -122,7 +122,7 @@ mod tests{
         assert!(p.contains(AreaPermission::U));
     }
     #[test]
-    fn test_map_area_permission_from_str(){
+    fn test_map_area_permission_from_str() {
         let s = "rwxu";
         let p = AreaPermission::from_str(s);
         assert!(p.contains(AreaPermission::R));
@@ -131,23 +131,22 @@ mod tests{
         assert!(p.contains(AreaPermission::U));
     }
     #[test]
-    fn test_map_area(){
+    fn test_map_area() {
         let rang = VPN::new(1)..VPN::new(100);
         let area = Area::new(rang.clone(), None, AreaPermission::from_str("x"));
-        let mut i  = 1;
-        area.iter().for_each(|(vpn,ppn)|{
-            assert_eq!(vpn,VPN::new(i));
-            i +=1;
+        let mut i = 1;
+        area.iter().for_each(|(vpn, ppn)| {
+            assert_eq!(vpn, VPN::new(i));
+            i += 1;
             assert!(ppn.is_none());
         });
         let ppn_s = PPN::new(1)..PPN::new(100);
         let area = Area::new(rang, Some(ppn_s), AreaPermission::W);
-        let mut i  = 1;
-        area.iter().for_each(|(vpn,ppn)|{
-            assert_eq!(vpn,VPN::new(i));
-            assert_eq!(ppn.unwrap(),PPN::new(i));
-            i +=1;
+        let mut i = 1;
+        area.iter().for_each(|(vpn, ppn)| {
+            assert_eq!(vpn, VPN::new(i));
+            assert_eq!(ppn.unwrap(), PPN::new(i));
+            i += 1;
         });
-
     }
 }

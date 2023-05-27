@@ -1,13 +1,13 @@
+use crate::entry::PageTableEntry;
+use crate::PPN;
 use core::fmt::{Debug, Formatter};
-use crate::{ PPN};
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
-use crate::entry::PageTableEntry;
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct PageTable {
-    entries: [PageTableEntry;512]
+    entries: [PageTableEntry; 512],
 }
 
 impl PageTable {
@@ -40,19 +40,16 @@ impl IndexMut<usize> for PageTable {
     }
 }
 
-
-
-
 #[cfg(test)]
-mod tests{
-    use crate::entry::PTELike;
+mod tests {
     use super::*;
+    use crate::entry::PTELike;
 
     #[test]
-    fn test_page_table(){
+    fn test_page_table() {
         let mut page_table = PageTable::new();
-        page_table.iter().for_each(|entry|{
-            assert!(!entry.is_valid())
-        });
+        page_table
+            .iter()
+            .for_each(|entry| assert!(!entry.is_valid()));
     }
 }
