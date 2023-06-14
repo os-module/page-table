@@ -31,42 +31,13 @@ bitflags::bitflags! {
 
 impl From<PTEFlags> for MappingFlags {
     fn from(f: PTEFlags) -> Self {
-        let mut ret = Self::empty();
-        if f.contains(PTEFlags::R) {
-            ret |= Self::READ;
-        }
-        if f.contains(PTEFlags::W) {
-            ret |= Self::WRITE;
-        }
-        if f.contains(PTEFlags::X) {
-            ret |= Self::EXECUTE;
-        }
-        if f.contains(PTEFlags::U) {
-            ret |= Self::USER;
-        }
-        ret
+        MappingFlags::from_bits_truncate(f.bits())
     }
 }
 
 impl From<MappingFlags> for PTEFlags {
     fn from(f: MappingFlags) -> Self {
-        if f.is_empty() {
-            return Self::empty();
-        }
-        let mut ret = Self::V;
-        if f.contains(MappingFlags::READ) {
-            ret |= Self::R;
-        }
-        if f.contains(MappingFlags::WRITE) {
-            ret |= Self::W;
-        }
-        if f.contains(MappingFlags::EXECUTE) {
-            ret |= Self::X;
-        }
-        if f.contains(MappingFlags::USER) {
-            ret |= Self::U;
-        }
-        ret
+        PTEFlags::from_bits_truncate(f.bits())
     }
 }
 
@@ -81,7 +52,7 @@ impl Rv64PTE {
 
 impl GenericPTE for Rv64PTE {
     fn new_page(paddr: PhysAddr, flags: MappingFlags, _is_huge: bool) -> Self {
-        let flags = PTEFlags::from(flags) | PTEFlags::A | PTEFlags::D;
+        let flags = PTEFlags::from(flags);
         debug_assert!(flags.intersects(PTEFlags::R | PTEFlags::X));
         Self(flags.bits() as u64 | ((paddr.as_usize() >> 2) as u64 & Self::PHYS_ADDR_MASK))
     }

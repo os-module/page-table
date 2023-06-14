@@ -9,18 +9,45 @@ bitflags::bitflags! {
     /// Generic page table entry flags that indicate the corresponding mapped
     /// memory region permissions and attributes.
     pub struct MappingFlags: usize {
+        const V         = 1 << 0;
         /// The memory is readable.
-        const READ          = 1 << 0;
+        const R          = 1 << 1;
         /// The memory is writable.
-        const WRITE         = 1 << 1;
+        const W         = 1 << 2;
         /// The memory is executable.
-        const EXECUTE       = 1 << 2;
+        const X      = 1 << 3;
         /// The memory is user accessible.
-        const USER          = 1 << 3;
-        /// The memory is device memory.
-        const DEVICE        = 1 << 4;
+        const U          = 1 << 4;
+        const G        = 1 << 5;
+        const A      = 1 << 6;
+        const D         = 1 << 7;
     }
 }
+
+
+impl From<&str> for MappingFlags{
+    fn from(value: &str) -> Self {
+        let mut ret = Self::empty();
+        for c in value.chars() {
+            match c {
+                'V' => ret |= Self::V,
+                'R' => ret |= Self::R,
+                'W' => ret |= Self::W,
+                'X' => ret |= Self::X,
+                'U' => ret |= Self::U,
+                'G' => ret |= Self::G,
+                'A' => ret |= Self::A,
+                'D' => ret |= Self::D,
+                _ => panic!("Invalid MappingFlags"),
+            }
+        }
+        ret
+    }
+}
+
+
+
+
 
 /// A generic page table entry.
 ///

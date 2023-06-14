@@ -2,7 +2,7 @@
 #![feature(const_trait_impl)]
 #![feature(const_mut_refs)]
 #![allow(unused)]
-
+#![no_std]
 pub mod addr;
 pub mod pte;
 pub mod table;

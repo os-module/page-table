@@ -39,6 +39,8 @@ pub enum PagingError {
     /// The page table entry represents a huge page, but the target physical
     /// frame is 4K in size.
     MappedToHugePage,
+    ///
+    AlreadyValid,
 }
 
 /// The specialized `Result` type for page table operations.
@@ -84,6 +86,8 @@ pub trait PagingIf: Sized {
     ///
     /// Used to access the physical memory directly in page table implementation.
     fn phys_to_virt(paddr: PhysAddr) -> VirtAddr;
+    /// Request to allocate a contiguous physical memory region.
+    fn alloc_contiguous_frames(size: usize) -> Option<PhysAddr>;
 }
 
 /// The page sizes supported by the hardware page table.
