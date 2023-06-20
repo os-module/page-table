@@ -38,7 +38,7 @@ const fn p1_index(vaddr: VirtAddr) -> usize {
 pub struct PageTable64<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> {
     root_paddr: PhysAddr,
     intrm_tables: Vec<PhysAddr>,
-    record: BTreeMap<VirtAddr, Option<PhysAddr>>,
+    record: BTreeMap<VirtAddr, bool>,
     _phantom: PhantomData<(M, PTE, IF)>,
 }
 
@@ -61,6 +61,17 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
         self.root_paddr
     }
 
+
+    ///
+    pub fn alloc_pages_info_mut(&mut self) ->&mut Vec<PhysAddr>{
+        &mut self.intrm_tables
+    }
+
+    pub fn get_record(&self)->BTreeMap<VirtAddr, bool>{
+        self.record.clone()
+    }
+
+
     /// Maps a virtual page to a physical frame with the given `page_size`
     /// and mapping `flags`. The physical frame will be allocated if `lazy_alloc` is true.
     /// If `lazy_alloc` is false, the physical frame is zero and user should set correct flags,because it will
@@ -77,30 +88,27 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
         page_size: PageSize,
         flags: MappingFlags,
         lazy_alloc: bool,
-    ) -> PagingResult {
+    ) -> PagingResult<PhysAddr> {
         let entry = self.get_entry_mut_or_create(vaddr, page_size)?;
         if !entry.is_unused() {
             return Err(PagingError::AlreadyMapped);
         }
+        let mut flags = flags;
         let phy = if lazy_alloc {
+            // assert!(!flags.contains(MappingFlags::V));
+            flags -= MappingFlags::V;
             PhysAddr::from(0)
         } else {
+            assert!(flags.contains(MappingFlags::V));
             let phy = IF::alloc_contiguous_frames(usize::from(page_size) / PAGE_SIZE_4K);
             if phy.is_none() {
                 return Err(PagingError::NoMemory);
             }
-            let phy = phy.unwrap();
-            phy
+            phy.unwrap()
         };
         *entry = GenericPTE::new_page(phy, flags, page_size.is_huge());
-        if !lazy_alloc{
-            for i in 0..usize::from(page_size) / PAGE_SIZE_4K {
-                let paddr = phy + i * PAGE_SIZE_4K;
-                self.intrm_tables.push(paddr)
-            }
-        }
-        self.record.insert(vaddr, None);
-        Ok(())
+        self.record.insert(vaddr, true);
+        Ok(phy)
     }
 
     ///
@@ -118,13 +126,31 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
         }
         let phy = phy.unwrap();
         *entry = GenericPTE::new_page(phy, flags, page_size.is_huge());
-
-        for i in 0..usize::from(page_size) / PAGE_SIZE_4K {
-            let paddr = phy + i * PAGE_SIZE_4K;
-            self.intrm_tables.push(paddr)
-        }
         Ok(())
     }
+
+    /// if re_alloc, user should remove old info about phy in intrm_tables
+    pub fn modify_pte_flags(&mut self,vaddr: VirtAddr,flags:MappingFlags,re_alloc:bool) -> PagingResult<Option<PhysAddr>>{
+        let (phy,_,page_size) = self.query(vaddr)?;
+        let phy = if re_alloc{
+            let phy = IF::alloc_contiguous_frames(usize::from(page_size) / PAGE_SIZE_4K);
+            if phy.is_none() {
+                return Err(PagingError::NoMemory);
+            }
+            let phy = phy.unwrap();
+            phy
+        }else {
+            phy
+        };
+        let (pte,page_size) = self.get_entry_mut(vaddr)?;
+        *pte =  GenericPTE::new_page(phy, flags, page_size.is_huge());
+        if re_alloc{
+            Ok(Some(phy))
+        }else {
+            Ok(None)
+        }
+    }
+
 
     /// Maps a virtual page to a physical frame with the given `page_size`
     /// and mapping `flags`.
@@ -146,9 +172,9 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
         if !entry.is_unused() {
             return Err(PagingError::AlreadyMapped);
         }
-        // warn!("map {:x} to {:x}, [{:?}]", vaddr, target,page_size);
+        trace!("map {:x} to {:x}, [{:?}]", vaddr, target,page_size);
         *entry = GenericPTE::new_page(target.align_down(page_size), flags, page_size.is_huge());
-        self.record.insert(vaddr, Some(target));
+        self.record.insert(vaddr, false);
         Ok(())
     }
 
@@ -162,14 +188,20 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
             return Err(PagingError::NotMapped);
         }
         let paddr = entry.paddr();
+        let flags = entry.flags();
         entry.clear();
-        self.record.remove(&vaddr);
-        self.intrm_tables.retain(|&x| x != paddr);
         // dealloc the physical frame
-        for i in 0..usize::from(size) / PAGE_SIZE_4K {
-            let paddr = paddr + i * PAGE_SIZE_4K;
-            IF::dealloc_frame(paddr);
+        let (v,target) = self.record.iter().find(|(&v,_)|{
+            v==vaddr
+        }).map(|(v,t)|{(v.clone(),t.clone())}).unwrap();
+        if target{
+            assert!(flags.contains(MappingFlags::V));
+            for i in 0..usize::from(size) / PAGE_SIZE_4K {
+                let paddr = paddr + i * PAGE_SIZE_4K;
+                IF::dealloc_frame(paddr);
+            }
         }
+        self.record.remove(&vaddr);
         Ok((paddr, size))
     }
 
@@ -489,6 +521,17 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
 
 impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> Drop for PageTable64<M, PTE, IF> {
     fn drop(&mut self) {
+        for (v_addr,target) in &self.record{
+            let (phy,flags,page_size) = self.query(*v_addr).inspect_err(|x|{
+                panic!("drop page table error: {:?}, vaddr: {:?}",x,v_addr);
+            }).unwrap();
+            if flags.contains(MappingFlags::V) & *target{
+                for i in 0..usize::from(page_size) / PAGE_SIZE_4K {
+                    let paddr = phy + i * PAGE_SIZE_4K;
+                    IF::dealloc_frame(paddr);
+                }
+            }
+        }
         for frame in &self.intrm_tables {
             IF::dealloc_frame(*frame);
         }
@@ -521,32 +564,7 @@ where
     }
 }
 
-impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> Clone for PageTable64<M, PTE, IF> {
-    fn clone(&self) -> Self {
-        let mut page_table = Self::try_new().unwrap();
-        self.record
-            .iter()
-            .for_each(|(vaddr,target)| {
-                let (find_phy,flags,page_size) = self.query(*vaddr).unwrap();
-                if target.is_none() {
-                    page_table
-                        .map_no_target(*vaddr, page_size, flags, false)
-                        .unwrap();
-                    // copy data
-                    let src_ptr = find_phy.as_usize() as *const u8;
-                    let dst_ptr = page_table.query(*vaddr).unwrap().0.as_usize() as *mut u8;
-                    unsafe {
-                        core::ptr::copy(src_ptr, dst_ptr, page_size.into());
-                    }
-                } else {
-                    page_table
-                        .map(*vaddr, target.unwrap(), page_size, flags)
-                        .unwrap()
-                }
-            });
-        page_table
-    }
-}
+
 
 impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> Debug for PageTable64<M, PTE, IF> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {

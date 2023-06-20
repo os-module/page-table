@@ -21,6 +21,7 @@ bitflags::bitflags! {
         const G        = 1 << 5;
         const A      = 1 << 6;
         const D         = 1 << 7;
+        const RSD = 1 << 8 | 1 << 9;
     }
 }
 

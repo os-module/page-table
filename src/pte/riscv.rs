@@ -26,6 +26,7 @@ bitflags::bitflags! {
         /// Indicates the virtual page has been written since the last time the
         /// D bit was cleared.
         const D =   1 << 7;
+        const RSD = 1 << 8 | 1 << 9;
     }
 }
 
