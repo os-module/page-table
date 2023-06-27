@@ -194,8 +194,7 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
         let (v,target) = self.record.iter().find(|(&v,_)|{
             v==vaddr
         }).map(|(v,t)|{(v.clone(),t.clone())}).unwrap();
-        if target{
-            assert!(flags.contains(MappingFlags::V));
+        if target&&flags.contains(MappingFlags::V){
             for i in 0..usize::from(size) / PAGE_SIZE_4K {
                 let paddr = paddr + i * PAGE_SIZE_4K;
                 IF::dealloc_frame(paddr);
