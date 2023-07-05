@@ -71,6 +71,9 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
         self.record.clone()
     }
 
+    pub fn get_record_mut(&mut self)->&mut BTreeMap<VirtAddr, bool>{
+        &mut self.record
+    }
 
     /// Maps a virtual page to a physical frame with the given `page_size`
     /// and mapping `flags`. The physical frame will be allocated if `lazy_alloc` is true.
