@@ -390,6 +390,26 @@ impl<M: PagingMetaData, PTE: GenericPTE, IF: PagingIf> PageTable64<M, PTE, IF> {
             func,
         )
     }
+
+    /// release the page table before drop
+    pub fn release(&mut self){
+        for (v_addr,&target) in &self.record{
+            let (phy,flags,page_size) = self.query(*v_addr).inspect_err(|x|{
+                panic!("drop page table error: {:?}, vaddr: {:?}",x,v_addr);
+            }).unwrap();
+            if flags.contains(MappingFlags::V) & target{
+                for i in 0..usize::from(page_size) / PAGE_SIZE_4K {
+                    let paddr = phy + i * PAGE_SIZE_4K;
+                    IF::dealloc_frame(paddr);
+                }
+            }
+        }
+        for frame in &self.intrm_tables {
+            IF::dealloc_frame(*frame);
+        }
+        self.intrm_tables.clear();
+        self.record.clear();
+    }
 }
 
 // Private implements.
