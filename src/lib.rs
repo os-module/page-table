@@ -1,177 +1,118 @@
-#![feature(step_trait)]
-#![feature(error_in_core)]
-#![cfg_attr(not(test), no_std)]
-#![allow(unused)]
+#![no_std]
+#![feature(doc_auto_cfg)]
+#![feature(doc_cfg)]
+#![feature(const_trait_impl)]
+#![forbid(unsafe_code)]
+mod page_table_entry;
+
+#[macro_use]
+extern crate log;
 extern crate alloc;
-use alloc::vec::Vec;
-use core::iter::Step;
-use core::marker::PhantomData;
-use core::ops::{Add, AddAssign, Range, Sub};
 
-mod area;
-mod entry;
-mod error;
-mod space;
-mod table;
+mod bits64;
+mod riscv;
 
-pub type PPN = PageNumber;
-pub type VPN = PageNumber;
+use alloc::boxed::Box;
 
-pub use area::{Area, AreaPermission};
-pub use entry::PTEFlags;
-pub use error::PTableError;
-pub use space::AddressSpace;
+use memory_addr::{PhysAddr, VirtAddr};
+#[doc(no_inline)]
+pub use page_table_entry::{riscv::Rv64PTE, GenericPTE, MappingFlags};
+pub use riscv::*;
 
-type Result<T> = core::result::Result<T, PTableError>;
+pub use self::bits64::{PageTable64, ENTRY_COUNT};
 
-#[derive(Copy, Clone, Debug, PartialOrd, PartialEq, Ord, Eq)]
-pub struct PageNumber(pub usize);
-
-pub trait VPNToSlice {
-    fn to_slice(&self) -> [usize; 3];
+/// The error type for page table operation failures.
+#[derive(Debug)]
+pub enum PagingError {
+    /// Cannot allocate memory.
+    NoMemory,
+    /// The address is not aligned to the page size.
+    NotAligned,
+    /// The mapping is not present.
+    NotMapped,
+    /// The mapping is already present.
+    AlreadyMapped,
+    /// The page table entry represents a huge page, but the target physical
+    /// frame is 4K in size.
+    MappedToHugePage,
+    /// The permission is invalid.
+    InvalidPermission,
 }
 
-impl PageNumber {
-    pub fn new(num: usize) -> Self {
-        Self(num)
-    }
-    pub fn to_address(&self) -> usize {
-        self.0 << 12
-    }
-    pub fn floor_address(address: usize) -> Self {
-        Self(address >> 12)
-    }
-    pub fn ceil_address(address: usize) -> Self {
-        Self((address + 4095) >> 12)
-    }
-}
+/// The specialized `Result` type for page table operations.
+pub type PagingResult<T = ()> = Result<T, PagingError>;
 
-impl Sub for PageNumber {
-    type Output = usize;
-    fn sub(self, rhs: Self) -> Self::Output {
-        self.0 - rhs.0
-    }
-}
+/// The **architecture-dependent** metadata that must be provided for
+/// [`PageTable64`].
+#[const_trait]
+pub trait PagingMetaData: Sync + Send + Sized {
+    /// The number of levels of the hardware page table.
+    const LEVELS: usize;
+    /// The maximum number of bits of physical address.
+    const PA_MAX_BITS: usize;
+    /// The maximum number of bits of virtual address.
+    const VA_MAX_BITS: usize;
 
-impl Add for PageNumber {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.0 + rhs.0)
-    }
-}
+    /// The maximum physical address.
+    const PA_MAX_ADDR: usize = (1 << Self::PA_MAX_BITS) - 1;
 
-impl From<usize> for PageNumber {
-    fn from(value: usize) -> Self {
-        Self(value)
+    /// Whether a given physical address is valid.
+    #[inline]
+    fn paddr_is_valid(paddr: usize) -> bool {
+        paddr <= Self::PA_MAX_ADDR // default
     }
-}
 
-impl VPNToSlice for PageNumber {
-    fn to_slice(&self) -> [usize; 3] {
-        let mut slice = [0; 3];
-        slice[0] = (self.0 >> 18) & 0x1ff;
-        slice[1] = (self.0 >> 9) & 0x1ff;
-        slice[2] = self.0 & 0x1ff;
-        slice
+    /// Whether a given virtual address is valid.
+    #[inline]
+    fn vaddr_is_valid(vaddr: usize) -> bool {
+        // default: top bits sign extended
+        let top_mask = usize::MAX << (Self::VA_MAX_BITS - 1);
+        (vaddr & top_mask) == 0 || (vaddr & top_mask) == top_mask
     }
 }
 
-impl Step for PageNumber {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        Some(end.0 - start.0)
-    }
+pub trait NotLeafPage<PTE: GenericPTE>: Send + Sync {
+    /// Returns the physical address
+    fn phys_addr(&self) -> PhysAddr;
+    /// Returns a virtual address that maps to the given physical address.
+    ///
+    /// Used to access the physical memory directly in page table implementation.
+    fn virt_addr(&self) -> VirtAddr;
+    /// Zero the page.
+    fn zero(&self);
+    fn as_pte_slice<'a>(&self) -> &'a [PTE];
+    fn as_pte_mut_slice<'a>(&self) -> &'a mut [PTE];
+}
 
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        Some(Self::new(start.0 + count))
-    }
+/// The low-level **OS-dependent** helpers that must be provided for
+/// [`PageTable64`].
+pub trait PagingIf<PTE: GenericPTE>: Sized {
+    /// Request to allocate a 4K-sized physical frame.
+    fn alloc_frame() -> Option<Box<dyn NotLeafPage<PTE>>>;
+}
 
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        Some(Self::new(start.0 - count))
+/// The page sizes supported by the hardware page table.
+#[repr(usize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PageSize {
+    /// Size of 4 kilobytes (2<sup>12</sup> bytes).
+    Size4K = 0x1000,
+    /// Size of 2 megabytes (2<sup>21</sup> bytes).
+    Size2M = 0x20_0000,
+    /// Size of 1 gigabytes (2<sup>30</sup> bytes).
+    Size1G = 0x4000_0000,
+}
+
+impl PageSize {
+    /// Whether this page size is considered huge (larger than 4K).
+    pub const fn is_huge(self) -> bool {
+        matches!(self, Self::Size1G | Self::Size2M)
     }
 }
 
-impl AddAssign for PageNumber {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-pub trait PageManager: Send + Sync {
-    fn alloc(&self) -> Option<PPN>;
-    fn dealloc(&self, ppn: PPN);
-}
-
-#[macro_export]
-/// 将一个地址区间转换为虚拟页号区间
-/// 起始地址向下取整，结束地址向上取整
-/// # Example
-/// ```
-/// use page_table::{vpn_f_c_range,VPN};
-/// let range = vpn_f_c_range!(0x1000, 0x2000);
-/// assert_eq!(range, VPN::new(1)..VPN::new(2));
-/// ```
-macro_rules! vpn_f_c_range {
-    ($start:expr, $end:expr) => {
-        VPN::floor_address($start)..VPN::ceil_address($end)
-    };
-}
-
-#[macro_export]
-/// 将一个地址区间转换为虚拟页号区间
-/// 起始地址向下取整，结束地址向上取整
-/// # Example
-/// ```
-/// use page_table::{ppn_f_c_range,PPN};
-/// let range = ppn_f_c_range!(0x1000, 0x2000);
-/// assert_eq!(range, PPN::new(1)..PPN::new(2));
-/// ```
-macro_rules! ppn_f_c_range {
-    ($start:expr, $end:expr) => {
-        PPN::floor_address($start)..PPN::ceil_address($end)
-    };
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{PageNumber, VPNToSlice, PPN, VPN};
-
-    #[test]
-    fn test_vpn_to_slice() {
-        let vpn = VPN::new(0b111_111_111_111_111_111_111_111_111);
-        let slice = vpn.to_slice();
-        assert_eq!(slice.len(), 3);
-        assert_eq!(slice[0], 511);
-        assert_eq!(slice[1], 511);
-        assert_eq!(slice[2], 511);
-        let num = 0b000_000_001_111_111_111_000_000_001usize;
-        let vpn: VPN = num.into();
-        let slice = vpn.to_slice();
-        assert_eq!(slice[0], 1);
-        assert_eq!(slice[1], 511);
-        assert_eq!(slice[2], 1);
-        let vpn = VPN::new(0x80200);
-        let slice = vpn.to_slice();
-        assert_eq!(slice[0], 2);
-        assert_eq!(slice[1], 1);
-        assert_eq!(slice[2], 0);
-    }
-    #[test]
-    fn test_page_number_from_address() {
-        let addr = 1024;
-        let vpn = PageNumber::ceil_address(addr);
-        assert_eq!(vpn.0, 1);
-        let addr = 4097;
-        let vpn = PageNumber::ceil_address(addr);
-        assert_eq!(vpn.0, 2);
-        let addr = 4096;
-        let vpn = PageNumber::ceil_address(addr);
-        assert_eq!(vpn.0, 1);
-    }
-    #[test]
-    fn test_page_number_range_macro() {
-        let vpn_s = vpn_f_c_range!(0, 10);
-        let ppn_s = ppn_f_c_range!(0, 10);
-        assert_eq!(vpn_s, VPN::new(0)..VPN::new(1));
-        assert_eq!(ppn_s, PPN::new(0)..PPN::new(1));
+impl From<PageSize> for usize {
+    #[inline]
+    fn from(size: PageSize) -> usize {
+        size as usize
     }
 }

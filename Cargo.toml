@@ -6,12 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+memory_addr = { git ="https://github.com/os-module/memory_addr" }
 bitflags = "1.3.2"
-cfg-if = "1.0.0"
-log = "0.4.14"
-
-
-[features]
-default = ["rv64"]
-rv32 = []
-rv64 = []
+log = "0"
